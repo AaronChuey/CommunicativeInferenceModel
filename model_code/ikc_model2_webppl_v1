@@ -1,0 +1,207 @@
+//utterance prior
+var utterancePrior = Categorical({vs: ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'hello'], ps: [1/9, 1/9, 1/9, 1/9, 1/9, 1/9, 1/9, 1/9, 1/9]})
+
+// 8-button toy that produces an outcome given an action
+var toy = function(action, probs) {
+  var prob = (action == '1') ? probs[0] :
+  (action == '2') ? probs[1] :
+  (action == '3') ? probs[2] :
+  (action == '4') ? probs[3] :
+  (action == '5') ? probs[4] :
+  (action == '6') ? probs[5] :
+  (action == '7') ? probs[6] :
+  (action == '8') ? probs[7] :
+  0
+  return categorical({vs: ['music', 'nothing'], 
+                      ps: [prob, 1-prob]})
+}
+
+//normalizes over probabilities
+var normalize = function(beliefs) {
+  var beliefSum = Math.sum.apply(Math, beliefs)
+  var newBelief1 = beliefs[0]/beliefSum
+  var newBelief2 = beliefs[1]/beliefSum
+  var newBelief3 = beliefs[2]/beliefSum
+  var newBelief4 = beliefs[3]/beliefSum
+  var newBelief5 = beliefs[4]/beliefSum
+  var newBelief6 = beliefs[5]/beliefSum
+  var newBelief7 = beliefs[6]/beliefSum
+  var newBelief8 = beliefs[7]/beliefSum
+  return [newBelief1, newBelief2, newBelief3, newBelief4, newBelief5, newBelief6, newBelief7, newBelief8]
+}
+
+// sample random action-outcome probabilities which sum to 1
+var sampleMusicProbs = function() {
+  var prob1 = exponential({a: 2})
+  var prob2 = exponential({a: 2})
+  var prob3 = exponential({a: 2})
+  var prob4 = exponential({a: 2})
+  var prob5 = exponential({a: 2})
+  var prob6 = exponential({a: 2})
+  var prob7 = exponential({a: 2})
+  var prob8 = exponential({a: 2})
+  var probs = [prob1, prob2, prob3, prob4, prob5, prob6, prob7, prob8]
+  return normalize(probs)
+  }
+
+// true action-outcome probabilities
+var trueProbs = [0, 0, 0, 0, 0, 1, 0, 0]
+
+// empirical priors (assumed for now)
+var priorProbs = [1/8, 1/8, 1/8, 1/8, 1/8, 1/8, 1/8, 1/8]
+
+// generates a distribution corresponding to costliness of actions relative to an agent's current location
+var cost = function(currentLocation, costFactor) {
+  var cost1 = Math.abs(1 - currentLocation)
+  var cost2 = Math.abs(2 - currentLocation)
+  var cost3 = Math.abs(3 - currentLocation)
+  var cost4 = Math.abs(4 - currentLocation)
+  var cost5 = Math.abs(5 - currentLocation)
+  var cost6 = Math.abs(6 - currentLocation)
+  var cost7 = Math.abs(7 - currentLocation)
+  var cost8 = Math.abs(8 - currentLocation)
+  var costs = [cost1, cost2, cost3, cost4, cost5, cost6, cost7, cost8] 
+  var normed1 = Math.pow(1 - normalize(costs)[0], costFactor)
+  var normed2 = Math.pow(1 - normalize(costs)[1], costFactor)
+  var normed3 = Math.pow(1 - normalize(costs)[2], costFactor)
+  var normed4 = Math.pow(1 - normalize(costs)[3], costFactor)
+  var normed5 = Math.pow(1 - normalize(costs)[4], costFactor)
+  var normed6 = Math.pow(1 - normalize(costs)[5], costFactor)
+  var normed7 = Math.pow(1 - normalize(costs)[6], costFactor)
+  var normed8 = Math.pow(1 - normalize(costs)[7], costFactor)
+  var finalNormedCosts = normalize([normed1, normed2, normed3, normed4, normed5, normed6, normed7, normed8])
+  return Categorical({vs: ['1', '2', '3', '4', '5', '6', '7', '8'], 
+                      ps: [finalNormedCosts[0], finalNormedCosts[1], finalNormedCosts[2], finalNormedCosts[3], finalNormedCosts[4], finalNormedCosts[5], finalNormedCosts[6], finalNormedCosts[7]]})
+}
+
+// generates a posterior over actions that achieve a goal based on beliefs
+var chooseAction = function(currentLocation, alpha, goalState, beliefs, transition) {
+  var actionPrior = cost(currentLocation, alpha)
+  var actionDist = Infer(function() {
+    var action = sample(actionPrior)
+    condition(goalState == transition(action, beliefs))
+    return action
+  })
+  return actionDist
+}
+
+// meaning function to interpret the utterances
+var literalMeanings = {
+  one: function(state) { return state == '1'; },
+  two: function(state) { return state == '2' },
+  three: function(state) { return state == '3'; },
+  four: function(state) { return state == '4'; },
+  five: function(state) { return state == '5'; },
+  six: function(state) { return state == '6'; },
+  seven: function(state) { return state == '7'; },
+  eight: function(state) { return state == '8'; },
+  hello: function(state) {return state == null}
+}
+
+// literal listener; updates beliefs based on utterance
+var literalListener = function(utterance, beliefs, trustFactor) {
+  var advice = Infer(function(){
+    var state = uniformDraw(['1', '2', '3', '4', '5', '6', '7', '8', null])
+    var meaning = literalMeanings[utterance]
+    condition(meaning(state))  
+    return state
+  })
+  var sampledAdvice = sample(advice)
+  var belief1 = (sampledAdvice == '1') ? beliefs[0]*trustFactor : beliefs[0]
+  var belief2 = (sampledAdvice == '2') ? beliefs[1]*trustFactor : beliefs[1]
+  var belief3 = (sampledAdvice == '3') ? beliefs[2]*trustFactor : beliefs[2]
+  var belief4 = (sampledAdvice == '4') ? beliefs[3]*trustFactor : beliefs[3]
+  var belief5 = (sampledAdvice == '5') ? beliefs[4]*trustFactor : beliefs[4]
+  var belief6 = (sampledAdvice == '6') ? beliefs[5]*trustFactor : beliefs[5]
+  var belief7 = (sampledAdvice == '7') ? beliefs[6]*trustFactor : beliefs[6]
+  var belief8 = (sampledAdvice == '8') ? beliefs[7]*trustFactor : beliefs[7]
+  var newBeliefs = [belief1, belief2, belief3, belief4, belief5, belief6, belief7, belief8]
+  var normedBeliefs = normalize(newBeliefs)
+  return normedBeliefs
+}
+
+// helper function for literal observer
+var binary = function(number) {
+  return (number >= 1) ? 1 : 0
+}
+
+// literal observer; updates beliefs based on observation
+var literalObserver = function(beliefs, action, outcome, transition) {
+  var newBelief = (outcome == 'music') ? 1 : 0
+  var belief1 = (action == '1') ? newBelief : beliefs[0]
+  var belief2 = (action == '2') ? newBelief : beliefs[1]
+  var belief3 = (action == '3') ? newBelief : beliefs[2]
+  var belief4 = (action == '4') ? newBelief : beliefs[3]
+  var belief5 = (action == '5') ? newBelief : beliefs[4]
+  var belief6 = (action == '6') ? newBelief : beliefs[5]
+  var belief7 = (action == '7') ? newBelief : beliefs[6]
+  var belief8 = (action == '8') ? newBelief : beliefs[7]
+  var normedBeliefs = normalize([belief1, belief2, belief3, belief4, belief5, belief6, belief7, belief8])
+  var binaryBeliefs = [binary(belief1), binary(belief2), binary(belief3), binary(belief4), binary(belief5), binary(belief6), binary(belief7), binary(belief8)]
+  return (newBelief == 1) ? binaryBeliefs : normedBeliefs
+}
+
+// literal speaker who produces utterance based on beliefs
+var speaker = function(speakerBeliefs, listenerBeliefs, informativity, trust) {
+  var utteranceDist = Infer(function(){
+    var utterance = sample(utterancePrior)
+    var categoricalBeliefs = categorical({vs: ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'], 
+                                          ps: [speakerBeliefs[0], speakerBeliefs[1], speakerBeliefs[2], speakerBeliefs[3], speakerBeliefs[4], speakerBeliefs[5], speakerBeliefs[6], speakerBeliefs[7]]})
+    var newListenerBeliefs = literalListener(utterance, listenerBeliefs, trust)
+    var categoricalListenerBeliefs = categorical({vs: ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'], 
+                                                  ps: [newListenerBeliefs[0], newListenerBeliefs[1], newListenerBeliefs[2], newListenerBeliefs[3], newListenerBeliefs[4], newListenerBeliefs[5], newListenerBeliefs[6], newListenerBeliefs[7]]})
+    condition(utterance == categoricalBeliefs)
+    condition(categoricalBeliefs == categoricalListenerBeliefs)
+    return flip(informativity) ? utterance : 'hello'
+  })
+  return sample(utteranceDist)
+}
+
+//cost parameter [-infinity, infinity]
+var alpha = 100
+
+//informativity parameter [0, 1]
+var inform = .8
+
+//trust parameter [0, infinity]
+var trust = 10
+
+//generate prediction for which speaker is more knowledgeable
+var knowledgePosterior = Infer({method: 'SMC', samples: 1000}, function() {
+  // near speaker + listener; fail-fail-communication-no_change-success
+  var listener1Knowledge = priorProbs
+  var listener1Goal = categorical({vs: ['nothing', 'music'], ps: [.5, .5]})
+  var speaker1Knowledge = sampleMusicProbs()
+
+  condition(listener1Goal == 'music')
+  observe(chooseAction(8, alpha, listener1Goal, listener1Knowledge, toy), '8')
+  var listener1Knowledge = literalObserver(listener1Knowledge, '8', 'nothing', toy)
+  observe(chooseAction(8, alpha, listener1Goal, listener1Knowledge, toy), '7')
+  var listener1Knowledge = literalObserver(listener1Knowledge, '7', 'nothing', toy)
+  var utterance1 = speaker(speaker1Knowledge, priorProbs, inform, trust)
+  var listener1Knowledge = literalListener(utterance1, listener1Knowledge, trust)
+  observe(chooseAction(7, alpha, listener1Goal, listener1Knowledge, toy), '6')
+  var nearKnowledge = speaker1Knowledge
+  
+  // far speaker + listener; fail-fail-communication-change-success
+  var listener2Knowledge = priorProbs
+  var L2S0 = listener2Knowledge
+  var listener2Goal = categorical({vs: ['nothing', 'music'], ps: [.5, .5]})
+  var speaker2Knowledge = sampleMusicProbs()
+
+  condition(listener2Goal == 'music')
+  observe(chooseAction(1, alpha, listener2Goal, listener2Knowledge, toy), '1')
+  var listener2Knowledge = literalObserver(listener2Knowledge, '1', 'nothing', toy)
+  observe(chooseAction(1, alpha, listener2Goal, listener2Knowledge, toy), '2')
+  var listener2Knowledge = literalObserver(listener2Knowledge, '2', 'nothing', toy)
+  var utterance2 = speaker(speaker2Knowledge, priorProbs, inform, trust)
+  var listener2Knowledge = literalListener(utterance2, listener2Knowledge, trust)
+  observe(chooseAction(2, alpha, listener2Goal, listener2Knowledge, toy), '6')
+  var farKnowledge = speaker2Knowledge
+  
+  var KnowledgeableSpeaker = (nearKnowledge[5] > farKnowledge[5]) ? "near" : "far"
+  
+  return [nearKnowledge[5], farKnowledge[5], KnowledgeableSpeaker]
+})
+
+viz.marginals(knowledgePosterior)
