@@ -1,0 +1,152 @@
+// empirical priors over listener actions (assumed for now)
+var actionPrior = Categorical({vs: ['left', 'right', 'both'], ps: [.4, .4, .2]})
+
+// empirical priors over speaker utterances (assumed for now)
+var utterancePrior = Categorical({vs: ['left', 'right', 'both', 'hello'], ps: [.25, .25, .25, .25]})
+
+// generates a posterior over actions that achieve a goal based on beliefs
+var chooseAction = function(actionPrior, goalState, beliefs, transition) {
+  var actionDist = Infer(function() {
+    var action = sample(actionPrior)
+    condition(goalState == transition(action, beliefs))
+    return action
+  })
+  return actionDist
+}
+
+// sample random action-outcome probabilities
+var sampleMusicProbs = function() {
+  var aProb = uniform(0, 1)
+  var bProb = uniform(0, 1)
+  var abProb = uniform(0, 1)
+  return [aProb, bProb, abProb]
+}
+
+// true action-outcome probabilities
+var trueProbs = [0, 0, 1]
+
+// empirical priors (assumed for now)
+var priorProbs = [.5, .5, .1]
+
+// toy that produces music based on an action with some supplied probability
+var toy = function(action, probs) {
+  var prob = (action == 'left') ? probs[0] :
+  (action == 'right') ? probs[1] :
+  (action == 'both') ? probs[2] :
+  0
+  return categorical({vs: ['music', 'nothing'], 
+                      ps: [prob, 1-prob]})
+}
+
+//normalizes over probabilities
+var normalize = function(beliefs) {
+  var leftProb = beliefs[0]
+  var rightProb = beliefs[1]
+  var bothProb = beliefs[2]
+  var allProbs = leftProb + rightProb + bothProb
+  var newLeftProb = leftProb / allProbs
+  var newRightProb = rightProb / allProbs
+  var newBothProb = bothProb / allProbs
+  return [newLeftProb, newRightProb, newBothProb]
+}
+
+// meaning function to interpret the utterances
+var literalMeanings = {
+  left: function(state) { return state == 'left'; },
+  right: function(state) { return state == 'right' },
+  both: function(state) { return state == 'both'; },
+  hello: function(state) {return state == null}
+}
+
+// literal listener; updates beliefs based on utterance
+var literalListener = function(utterance, beliefs) {
+  var advice = Infer(function(){
+    var state = uniformDraw(['left', 'right', 'both', null])
+    var meaning = literalMeanings[utterance]
+    condition(meaning(state))  
+    return state
+  })
+  var sampledAdvice = sample(advice)
+  var leftBelief = (sampledAdvice == 'left') ? 1 : beliefs[0]
+  var rightBelief = (sampledAdvice == 'right') ? 1 : beliefs[1]
+  var bothBelief = (sampledAdvice == 'both') ? 1 : beliefs[2]
+  return [leftBelief, rightBelief, bothBelief]
+}
+
+// literal observer; updates beliefs based on observation
+var literalObserver = function(beliefs, action, outcome, transition) {
+  var sampledBeliefs = Infer({method: 'rejection'}, function(){
+    var newBelief = sampleMusicProbs()
+    condition(transition(action, newBelief) == outcome)
+    return newBelief
+  })
+  var sampledBelief = sample(sampledBeliefs)
+  
+  var leftBelief = (action == 'left') ? sampledBelief[0] : beliefs[0]
+  var rightBelief = (action == 'right') ? sampledBelief[1] : beliefs[1]
+  var bothBelief = (action == 'both') ? sampledBelief[2] : beliefs[2]
+  return [leftBelief, rightBelief, bothBelief]
+}
+
+// literal speaker who produces utterance based on beliefs
+var speaker = function(speakerBeliefs, listenerBeliefs) {
+  var sampledUtterance = Infer(function(){
+    var utterance = sample(utterancePrior)
+    var normedBeliefs = normalize(speakerBeliefs)
+    var categoricalBeliefs = Categorical({vs: ['left', 'right', 'both'], ps: [normedBeliefs[0], normedBeliefs[1], normedBeliefs[2]]})
+    var listenerBeliefs = literalListener(utterance, listenerBeliefs)
+    var normedListenerbeliefs = normalize(listenerBeliefs)
+    var categoricalListenerBeliefs = Categorical({vs: ['left', 'right', 'both'], ps: [normedListenerbeliefs[0], normedListenerbeliefs[1], normedListenerbeliefs[2]]})
+    condition(utterance == sample(categoricalBeliefs))
+    condition(sample(categoricalBeliefs) == sample(categoricalListenerBeliefs))
+    return utterance
+  })
+  return flip(.75) ? sample(sampledUtterance) : 'hello'
+}
+
+var knowledgePosterior = Infer(function() {
+  // prefail speaker + listener; fail-communicate-fail-success
+  var listener1Knowledge = priorProbs
+  var listener1Goal = categorical({vs: ['nothing', 'music'], ps: [.5, .5]})
+  var speaker1Knowledge = sampleMusicProbs()
+
+  condition(listener1Goal == 'music')
+  observe(chooseAction(actionPrior, listener1Goal, listener1Knowledge, toy), 'left')
+  var listener1Knowledge = literalObserver(sampleMusicProbs(), 'left', 'nothing', toy)
+  observe(chooseAction(actionPrior, listener1Goal, listener1Knowledge, toy), 'right')
+  var listener1Knowledge = literalObserver(listener1Knowledge, 'right', 'nothing', toy)
+  var utterance1 = speaker(speaker1Knowledge, listener1Knowledge)
+  var listener1Knowledge = literalListener(utterance1, listener1Knowledge)
+  observe(chooseAction(actionPrior, listener1Goal, listener1Knowledge, toy), 'left')
+  var listener1Knowledge = literalObserver(listener1Knowledge, 'left', 'nothing', toy)
+  observe(chooseAction(actionPrior, listener1Goal, listener1Knowledge, toy), 'right')
+  var listener1Knowledge = literalObserver(listener1Knowledge, 'right', 'nothing', toy)
+  observe(chooseAction(actionPrior, listener1Goal, listener1Knowledge, toy), 'both')
+  
+  // postfail speaker + listener; fail-fail-communicate-success
+  var listener2Knowledge = priorProbs
+  var listener2Goal = categorical({vs: ['nothing', 'music'], ps: [.5, .5]})
+  var speaker2Knowledge = sampleMusicProbs()
+
+  condition(listener2Goal == 'music')
+  observe(chooseAction(actionPrior, listener2Goal, listener2Knowledge, toy), 'left')
+  var listener2Knowledge = literalObserver(sampleMusicProbs(), 'left', 'nothing', toy)
+  observe(chooseAction(actionPrior, listener2Goal, listener2Knowledge, toy), 'right')
+  var listener2Knowledge = literalObserver(listener2Knowledge, 'right', 'nothing', toy)
+  observe(chooseAction(actionPrior, listener2Goal, listener2Knowledge, toy), 'left')
+  var listener2Knowledge = literalObserver(listener2Knowledge, 'left', 'nothing', toy)
+  observe(chooseAction(actionPrior, listener2Goal, listener2Knowledge, toy), 'right')
+  var listener2Knowledge = literalObserver(listener2Knowledge, 'right', 'nothing', toy)
+  var utterance2 = speaker(speaker2Knowledge, listener2Knowledge)
+  var listener2Knowledge = literalListener(utterance2, listener2Knowledge)
+  observe(chooseAction(actionPrior, listener2Goal, listener2Knowledge, toy), 'both')
+  
+  var speaker1Beliefs = normalize(speaker1Knowledge)
+  var speaker2Beliefs = normalize(speaker2Knowledge)
+  
+  var KnowledgeableSpeaker = (speaker1Beliefs[2] > speaker2Beliefs[2]) ? "Speaker 1" : "Speaker 2"
+
+  return KnowledgeableSpeaker
+})
+
+viz(knowledgePosterior)
